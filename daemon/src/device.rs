@@ -33,6 +33,7 @@ use goxlr_usb::routing::{InputDevice, OutputDevice};
 use crate::audio::{AudioFile, AudioHandler};
 use crate::events::EventTriggers;
 use crate::events::EventTriggers::TTSMessage;
+use crate::faderpaging::FaderPaging;
 use crate::files::find_file_in_path;
 use crate::firmware::firmware_update::{
     FirmwareMessages, HardwareProgressResponse, ProgressResponse, ValidateUploadChunkResponse,
@@ -1206,6 +1207,10 @@ impl<'a> Device<'a> {
         // Send the TTS Message..
         let tts_message = format!("Sample {bank}");
         let _ = self.global_events.send(TTSMessage(tts_message)).await;
+
+        if bank != self.profile.get_active_sample_bank() {
+            self.sample_bank_changed(&bank).await;
+        }
 
         self.profile.load_sample_bank(bank)?;
 
@@ -3775,7 +3780,18 @@ impl<'a> Device<'a> {
         debug!("Validating Sampler Configuration..");
         self.validate_sampler().await?;
 
+        debug!("Setting Up Fader Paging ...");
+        FaderPaging::new().setup_pages(self).await;
+
         Ok(())
+    }
+
+    pub(crate) fn get_goxlr(&mut self) -> &mut Box<dyn FullGoXLRDevice + 'static> {
+        &mut self.goxlr
+    }
+
+    pub async fn sample_bank_changed(&mut self, bank: &SampleBank) {
+        FaderPaging::new().change_page(self, bank);
     }
 
     fn get_load_volume_order(&self, volumes: Option<EnumMap<ChannelName, u8>>) -> Vec<ChannelName> {

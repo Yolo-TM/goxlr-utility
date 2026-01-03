@@ -4,7 +4,7 @@ use std::io::Error;
 use windres::Build;
 
 fn main() -> Result<(), Error> {
-    #[cfg(target_os = "windows")]
+    #[cfg(not(target_os = "windows"))]
     {
         Build::new()
             .compile("./resources/goxlr-launcher.rc")

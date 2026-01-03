@@ -11,7 +11,7 @@ use windres::Build;
 include!("src/cli.rs");
 
 fn main() -> Result<(), Error> {
-    #[cfg(target_os = "windows")]
+    #[cfg(not(target_os = "windows"))]
     {
         Build::new().compile("resources/goxlr-daemon.rc").unwrap();
     }

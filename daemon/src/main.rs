@@ -55,6 +55,8 @@ mod shutdown;
 mod tray;
 mod tts;
 
+mod faderpaging;
+
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[allow(dead_code)]

@@ -3781,17 +3781,17 @@ impl<'a> Device<'a> {
         self.validate_sampler().await?;
 
         debug!("Setting Up Fader Paging ...");
-        FaderPaging::new().setup_pages(self).await;
+        // Boxed because FaderPaging uses perform_command which again has options in its match arms where apply_profile (this method) is called.
+        // Rust therefore cannot prove that we dont have an infinite recursion here.
+        Box::pin(FaderPaging::new().setup_pages(self)).await;
 
         Ok(())
     }
 
-    pub(crate) fn get_goxlr(&mut self) -> &mut Box<dyn FullGoXLRDevice + 'static> {
-        &mut self.goxlr
-    }
+
 
     pub async fn sample_bank_changed(&mut self, bank: &SampleBank) {
-        FaderPaging::new().change_page(self, bank);
+        Box::pin(FaderPaging::new().change_page(self, bank)).await;
     }
 
     fn get_load_volume_order(&self, volumes: Option<EnumMap<ChannelName, u8>>) -> Vec<ChannelName> {

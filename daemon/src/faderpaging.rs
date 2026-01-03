@@ -1,3 +1,4 @@
+use goxlr_ipc::GoXLRCommand;
 use goxlr_types::{ChannelName, FaderName, SampleBank};
 use log::debug;
 use crate::device::Device;
@@ -113,36 +114,33 @@ impl<'a> FaderPaging<'a> {
         Self { pages, _bullshit_device_settings_bs_marker: std::marker::PhantomData }
     }
 
-    pub fn change_page(&self, device: &mut Device, bank: &SampleBank) {
+    pub async fn change_page(&self, device: &mut Device<'a>, bank: &SampleBank) {
         if let Some(page) = self.pages.iter().find(|p| p.id == *bank) {
-            self.apply_page(device, page);
+            self.apply_page(device, page).await;
         }
         debug!("Fader page changed to {:?}", bank);
     }
 
     pub async fn setup_pages(&self, device: &mut Device<'a>) {
         for page in self.pages.iter().rev() {
-            self.apply_page(device, page);
-            tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+            self.apply_page(device, page).await;
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         }
         debug!("Fader paging setup complete.");
     }
 
-    fn apply_page(&self, device: &mut Device, page: &Page) {
-        self.apply_fader_item(device, &page.fader_a);
-        self.apply_fader_item(device, &page.fader_b);
-        self.apply_fader_item(device, &page.fader_c);
-        self.apply_fader_item(device, &page.fader_d);
+    async fn apply_page(&self, device: &mut Device<'a>, page: &Page) {
+        self.apply_fader_item(device, &page.fader_a).await;
+        self.apply_fader_item(device, &page.fader_b).await;
+        self.apply_fader_item(device, &page.fader_c).await;
+        self.apply_fader_item(device, &page.fader_d).await;
     }
 
-    fn apply_fader_item(&self, device: &mut Device, fader_item: &FaderItem) {
-        match device.get_goxlr().set_fader(fader_item.id, fader_item.channel) {
-            Ok(_) => (),
-            Err(e) => debug!("Failed to set fader {:?} to channel {:?}: {:?}", fader_item.id, fader_item.channel, e),
-        }
-        match device.get_goxlr().set_fader_display_mode(fader_item.id, fader_item.gradient, fader_item.meter) {
-            Ok(_) => (),
-            Err(e) => debug!("Failed to set fader {:?} display mode: {:?}", fader_item.id, e),
-        }
+    async fn apply_fader_item(&self, device: &mut Device<'a>, fader_item: &FaderItem) {
+        device.perform_command(GoXLRCommand::SetFader(fader_item.id, fader_item.channel)).await.unwrap();
+        //device.perform_command(GoXLRCommand::SetFaderColours(fader_item.id, (), ())).await.unwrap();
+        device.perform_command(GoXLRCommand::SetScribbleText(fader_item.id, fader_item.channel.to_string())).await.unwrap();
+        device.perform_command(GoXLRCommand::SetScribbleNumber(fader_item.id, String::from("Hello"))).await.unwrap();
+        device.perform_command(GoXLRCommand::SetScribbleInvert(fader_item.id, true)).await.unwrap();
     }
 }

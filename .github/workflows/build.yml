@@ -78,7 +78,7 @@ jobs:
       # fails with "path not found" on newer cargo (build/<crate>/<hash>/out). Remove once tolk is fixed.
       - uses: dtolnay/rust-toolchain@1.93.0
         with:
-          components: clippy
+          components: clippy, rustfmt
 
       - name: Preparing Cache..
         uses: actions/cache@v4

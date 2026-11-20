@@ -4,11 +4,12 @@ use std::io::Error;
 use windres::Build;
 
 fn main() -> Result<(), Error> {
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "windows")]
     {
-        Build::new()
-            .compile("./resources/goxlr-launcher.rc")
-            .unwrap();
+        // Embedding the icon / version info needs windres, don't fail the build without it.
+        if let Err(e) = Build::new().compile("./resources/goxlr-launcher.rc") {
+            println!("cargo:warning=Skipping Windows resources (windres unavailable?): {e}");
+        }
     }
 
     Ok(())

@@ -46,7 +46,9 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned: this is the version the build is verified with locally, current stable fails on the
+      # Windows runner (upstream's own Windows check fails the same way on main).
+      - uses: dtolnay/rust-toolchain@1.93.0
       - uses: Swatinem/rust-cache@v2
       - name: Build
         run: cargo build --release --all-features

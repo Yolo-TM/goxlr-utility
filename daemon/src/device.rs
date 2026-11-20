@@ -1342,8 +1342,12 @@ impl<'a> Device<'a> {
 
         if let Some(scribble) = &entry.scribble {
             self.profile.set_scribble_icon(fader, scribble.icon.clone());
-            self.profile
-                .set_scribble_text(fader, scribble.text.clone().unwrap_or_default());
+            // No text configured: show the name of whatever is assigned to the fader.
+            let text = match &scribble.text {
+                Some(text) => text.clone(),
+                None => self.profile.get_fader_assignment(fader).to_string(),
+            };
+            self.profile.set_scribble_text(fader, text);
             self.profile
                 .set_scribble_number(fader, scribble.number.clone().unwrap_or_default());
             self.profile.set_scribble_inverted(fader, scribble.inverted);
@@ -1353,6 +1357,12 @@ impl<'a> Device<'a> {
                     .set_simple_colours(fader_scribble_target(fader), colour.clone())?;
                 colours_changed = true;
             }
+            self.apply_scribble(fader).await?;
+        } else if entry.channel.is_some() {
+            // The scribble isn't configured by the page, but the channel changed, so at least keep
+            // the screen text in sync with what is on the fader.
+            let name = self.profile.get_fader_assignment(fader).to_string();
+            self.profile.set_scribble_text(fader, name);
             self.apply_scribble(fader).await?;
         }
 

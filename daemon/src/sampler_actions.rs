@@ -264,6 +264,29 @@ mod tests {
         assert!(pads_for_bank(&config, SampleBank::A, true).is_empty());
     }
 
+    /// The web UI builds these payloads by hand, make sure they match the Rust types.
+    #[test]
+    fn web_ui_payloads_deserialise() {
+        let payloads = [
+            r#"{"SetSamplerAction":[null,"TopLeft",{"Launch":{"command_line":"app.exe --x","working_dir":null}}]}"#,
+            r#"{"SetSamplerAction":["A","TopRight",{"Open":{"target":"https://example.org"}}]}"#,
+            r#"{"SetSamplerAction":["B","BottomLeft",{"SwitchEffectPreset":"Preset3"}]}"#,
+            r#"{"SetSamplerAction":[null,"BottomRight",{"SwitchProfile":{"name":"Stream","mic":false}}]}"#,
+            r#"{"SetSamplerAction":["C","TopLeft",{"Macro":[{"SetFXEnabled":true},{"SetActiveSamplerBank":"A"}]}]}"#,
+            r#"{"ClearSamplerAction":[null,"TopLeft"]}"#,
+            r#"{"TestSamplerAction":["A","TopLeft"]}"#,
+            r#"{"SetSamplerActionsEnabled":true}"#,
+            r#"{"SetFaderPagingEnabled":true}"#,
+            r#"{"CaptureFaderPage":"B"}"#,
+            r#"{"SetFaderPageEntry":["A",{"fader":"B","channel":"Music","mute_function":null,"display_style":"GradientMeter","fader_colours":["FF0000","00FF00"],"mute_colours":["FF0000","00FF00"],"mute_off_style":"Dimmed","scribble":{"icon":null,"text":null,"number":"2","inverted":true,"colour":"FFFFFF"}}]}"#,
+        ];
+
+        for payload in payloads {
+            let parsed: Result<GoXLRCommand, _> = serde_json::from_str(payload);
+            assert!(parsed.is_ok(), "{payload}: {:?}", parsed.err());
+        }
+    }
+
     #[test]
     fn validation() {
         assert!(validate(&macro_action()).is_ok());

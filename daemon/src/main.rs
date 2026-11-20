@@ -43,6 +43,7 @@ mod audio;
 mod cli;
 mod device;
 mod events;
+mod fader_pages;
 mod files;
 mod firmware;
 mod mic_profile;

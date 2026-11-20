@@ -84,9 +84,69 @@ pub struct MixerStatus {
     pub effects: Option<Effects>,
     pub sampler: Option<Sampler>,
     pub settings: Settings,
+    pub fader_paging: FaderPagingConfig,
     pub button_down: EnumMap<Button, bool>,
     pub profile_name: String,
     pub mic_profile_name: String,
+}
+
+/// Fader Paging configuration, one per device. Every field of a page entry is optional,
+/// `None` means "leave whatever the current profile has".
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FaderPagingConfig {
+    pub enabled: bool,
+    pub pages: Vec<FaderPage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FaderPage {
+    pub bank: SampleBank,
+    pub faders: Vec<FaderPageEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FaderPageEntry {
+    pub fader: FaderName,
+    pub channel: Option<ChannelName>,
+    pub mute_function: Option<MuteFunction>,
+    pub display_style: Option<FaderDisplayStyle>,
+    pub fader_colours: Option<(String, String)>,
+    pub mute_colours: Option<(String, String)>,
+    pub mute_off_style: Option<ButtonColourOffStyle>,
+    pub scribble: Option<FaderPageScribble>,
+}
+
+impl FaderPageEntry {
+    pub fn new(fader: FaderName) -> Self {
+        Self {
+            fader,
+            channel: None,
+            mute_function: None,
+            display_style: None,
+            fader_colours: None,
+            mute_colours: None,
+            mute_off_style: None,
+            scribble: None,
+        }
+    }
+}
+
+impl Default for FaderPageEntry {
+    fn default() -> Self {
+        Self::new(FaderName::A)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FaderPageScribble {
+    pub icon: Option<String>,
+    pub text: Option<String>,
+    pub number: Option<String>,
+    pub inverted: bool,
+    pub colour: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

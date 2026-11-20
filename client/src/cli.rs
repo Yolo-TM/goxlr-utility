@@ -111,6 +111,12 @@ pub enum SubCommands {
         fader: FaderCommands,
     },
 
+    /// Fader Paging, use the Sampler Banks A / B / C as pages for the faders
+    FaderPaging {
+        #[command(subcommand)]
+        command: FaderPagingCommands,
+    },
+
     /// Commands for configuring the cough button
     CoughButton {
         #[command(subcommand)]
@@ -1043,6 +1049,36 @@ pub enum HardTune {
     Enabled {
         #[arg(value_parser, action = ArgAction::Set)]
         enabled: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+#[command(arg_required_else_help = true)]
+pub enum FaderPagingCommands {
+    /// Enable or disable Fader Paging
+    Enabled {
+        #[arg(value_parser, action = ArgAction::Set)]
+        enabled: bool,
+    },
+
+    /// Store the current faders (channel, colours, scribble) as the page for a Bank
+    Capture {
+        #[arg(value_enum)]
+        bank: SampleBank,
+    },
+
+    /// Apply a stored page to the device without changing the active Bank
+    Apply {
+        #[arg(value_enum)]
+        bank: SampleBank,
+    },
+
+    /// Remove the stored entry for a single fader on a page
+    Clear {
+        #[arg(value_enum)]
+        bank: SampleBank,
+        #[arg(value_enum)]
+        fader: FaderName,
     },
 }
 

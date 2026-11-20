@@ -1,10 +1,10 @@
 use crate::cli::{
     AnimationCommands, ButtonGroupLightingCommands, ButtonLightingCommands, CompressorCommands,
     CoughButtonBehaviours, Echo, EffectsCommands, EqualiserCommands, EqualiserMiniCommands,
-    FaderCommands, FaderLightingCommands, FadersAllLightingCommands, FirmwareCommands, Gender,
-    HardTune, LightingCommands, Megaphone, MicrophoneCommands, NoiseGateCommands, Pitch,
-    ProfileAction, ProfileType, Reverb, Robot, SamplerCommands, Scribbles, SubCommands,
-    SubmixCommands,
+    FaderCommands, FaderLightingCommands, FaderPagingCommands, FadersAllLightingCommands,
+    FirmwareCommands, Gender, HardTune, LightingCommands, Megaphone, MicrophoneCommands,
+    NoiseGateCommands, Pitch, ProfileAction, ProfileType, Reverb, Robot, SamplerCommands,
+    Scribbles, SubCommands, SubmixCommands,
 };
 use crate::cli::{Cli, DeviceSettings};
 use crate::microphone::apply_microphone_controls;
@@ -182,6 +182,24 @@ pub async fn run_cli() -> Result<()> {
                             .await?;
                     }
                 },
+                SubCommands::FaderPaging { command } => {
+                    let command = match command {
+                        FaderPagingCommands::Enabled { enabled } => {
+                            GoXLRCommand::SetFaderPagingEnabled(*enabled)
+                        }
+                        FaderPagingCommands::Capture { bank } => {
+                            GoXLRCommand::CaptureFaderPage(*bank)
+                        }
+                        FaderPagingCommands::Apply { bank } => GoXLRCommand::ApplyFaderPage(*bank),
+                        FaderPagingCommands::Clear { bank, fader } => {
+                            GoXLRCommand::ClearFaderPageEntry(*bank, *fader)
+                        }
+                    };
+                    client
+                        .command(&serial, command)
+                        .await
+                        .context("Unable to update Fader Paging")?;
+                }
                 SubCommands::Faders { fader } => match fader {
                     FaderCommands::Channel { fader, channel } => {
                         client

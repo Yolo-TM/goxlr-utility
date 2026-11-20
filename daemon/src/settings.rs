@@ -1,3 +1,4 @@
+use crate::fader_pages::FaderPagesHandle;
 use crate::mic_profile::DEFAULT_MIC_PROFILE_NAME;
 use crate::profile::DEFAULT_PROFILE_NAME;
 use anyhow::{Context, Result};
@@ -18,6 +19,7 @@ use tokio::sync::RwLock;
 #[derive(Debug, Clone)]
 pub struct SettingsHandle {
     path: PathBuf,
+    fader_pages: FaderPagesHandle,
     data_dir: PathBuf,
     settings: Arc<RwLock<Settings>>,
 }
@@ -154,8 +156,10 @@ impl SettingsHandle {
             settings.devices = Some(Default::default());
         }
 
+        let fader_pages = FaderPagesHandle::load(&path);
         let handle = SettingsHandle {
             path,
+            fader_pages,
             data_dir: data_dir.to_path_buf(),
             settings: Arc::new(RwLock::new(settings)),
         };
@@ -172,6 +176,11 @@ impl SettingsHandle {
                 e
             );
         }
+    }
+
+    /// Fader Paging lives in its own file (fader-pages.json) next to the settings.
+    pub fn fader_pages(&self) -> &FaderPagesHandle {
+        &self.fader_pages
     }
 
     fn get_default_path(&self, suffix: Paths) -> PathBuf {

@@ -284,6 +284,7 @@ impl<'a> Device<'a> {
 
         let locked_faders = self.settings.get_device_lock_faders(self.serial()).await;
         let vod_mode = self.settings.get_device_vod_mode(self.serial()).await;
+        let fader_paging = self.settings.fader_pages().get(self.serial()).await;
 
         let sampler_fade_duration = self.settings.get_sampler_fade_duration(self.serial()).await;
 
@@ -342,6 +343,7 @@ impl<'a> Device<'a> {
                     last_error: sample_error,
                 },
             ),
+            fader_paging,
             settings: Settings {
                 display: Display {
                     gate: self.mic_profile.get_gate_display_mode(),
@@ -425,6 +427,11 @@ impl<'a> Device<'a> {
                 | GoXLRCommand::SetMonitorWithFx(_)
                 | GoXLRCommand::SetSamplerResetOnClear(_)
                 | GoXLRCommand::SetLockFaders(_)
+                // fader-pages.json
+                | GoXLRCommand::SetFaderPagingEnabled(_)
+                | GoXLRCommand::SetFaderPageEntry(_, _)
+                | GoXLRCommand::ClearFaderPageEntry(_, _)
+                | GoXLRCommand::CaptureFaderPage(_)
                 => {
                     if !avoid_write {
                         let _ = self.perform_command(command).await;
@@ -1217,7 +1224,184 @@ impl<'a> Device<'a> {
                 }
             }
         }
+
+        // Fader Paging, the bank doubles as the active fader 'page'. A broken page config
+        // shouldn't stop the bank from changing, so log rather than propagate.
+        if let Err(e) = self.apply_active_fader_page().await {
+            warn!("Unable to apply Fader Page for Bank {bank}: {e:#}");
+        }
         Ok(())
+    }
+
+    async fn set_fader_mute_function(
+        &mut self,
+        fader: FaderName,
+        behaviour: goxlr_types::MuteFunction,
+    ) -> Result<()> {
+        if self.profile.get_mute_button_behaviour(fader) == behaviour {
+            // Settings are the same..
+            return Ok(());
+        }
+
+        // Unmute the channel to prevent weirdness, then set new behaviour
+        //self.unmute_fader(fader).await?;
+        self.profile.set_mute_button_behaviour(fader, behaviour);
+
+        // We'll pass 'None' into this as there's a guaranteed change..
+        self.apply_mute_from_profile(fader, None)?;
+
+        let channel = self.profile.get_fader_assignment(fader);
+        if BasicInputDevice::can_from(channel) {
+            let input = BasicInputDevice::from(channel);
+            self.apply_routing(input).await?;
+
+            if input == BasicInputDevice::Chat && self.vc_mute_also_mute_cm {
+                // Reapply the Mic routing in case we need to mute / unmute to Voice Chat
+                self.apply_routing(BasicInputDevice::Microphone).await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Applies the Fader Page for the currently active Sampler Bank (if paging is enabled).
+    async fn apply_active_fader_page(&mut self) -> Result<()> {
+        // The Mini has no Sampler Banks, and so has no pages.
+        if self.is_device_mini() {
+            return Ok(());
+        }
+
+        let config = self.settings.fader_pages().get(self.serial()).await;
+        if !config.enabled {
+            return Ok(());
+        }
+
+        let bank = self.profile.get_active_sample_bank();
+        if let Some(page) = config.pages.iter().find(|p| p.bank == bank) {
+            self.apply_fader_page(page).await?;
+        }
+        Ok(())
+    }
+
+    async fn apply_fader_page(&mut self, page: &goxlr_ipc::FaderPage) -> Result<()> {
+        if self.is_device_mini() {
+            bail!("Fader Paging is not supported on the GoXLR Mini");
+        }
+
+        debug!("Applying Fader Page {:?}", page.bank);
+        let mut colours_changed = false;
+        for entry in &page.faders {
+            // One bad entry (an invalid colour for example) shouldn't block the others.
+            match self.apply_fader_page_entry(entry).await {
+                Ok(changed) => colours_changed |= changed,
+                Err(e) => warn!(
+                    "Unable to apply Fader Page entry for {}: {e:#}",
+                    entry.fader
+                ),
+            }
+        }
+
+        // Colours are sent to the device as one map, so only do it once for the whole page.
+        if colours_changed {
+            self.load_colour_map().await?;
+        }
+        self.update_button_states()?;
+        Ok(())
+    }
+
+    /// Applies a single fader entry, returns whether the colour map needs reloading.
+    async fn apply_fader_page_entry(&mut self, entry: &goxlr_ipc::FaderPageEntry) -> Result<bool> {
+        let fader = entry.fader;
+        let mut colours_changed = false;
+
+        if let Some(channel) = entry.channel {
+            self.set_fader(fader, channel).await?;
+        }
+        if let Some(function) = entry.mute_function {
+            self.set_fader_mute_function(fader, function).await?;
+        }
+        if let Some(style) = entry.display_style {
+            self.profile.set_fader_display(fader, style);
+            self.set_fader_display_from_profile(fader)?;
+        }
+        if let Some((top, bottom)) = &entry.fader_colours {
+            self.profile
+                .set_fader_colours(fader, top.clone(), bottom.clone())?;
+            colours_changed = true;
+        }
+
+        let mute_button = fader_mute_button(fader);
+        if let Some((one, two)) = &entry.mute_colours {
+            self.profile
+                .set_button_colours(mute_button, one.clone(), Some(two))?;
+            colours_changed = true;
+        }
+        if let Some(style) = entry.mute_off_style {
+            self.profile.set_button_off_style(mute_button, style);
+            colours_changed = true;
+        }
+
+        if let Some(scribble) = &entry.scribble {
+            self.profile.set_scribble_icon(fader, scribble.icon.clone());
+            self.profile
+                .set_scribble_text(fader, scribble.text.clone().unwrap_or_default());
+            self.profile
+                .set_scribble_number(fader, scribble.number.clone().unwrap_or_default());
+            self.profile.set_scribble_inverted(fader, scribble.inverted);
+
+            if let Some(colour) = &scribble.colour {
+                self.profile
+                    .set_simple_colours(fader_scribble_target(fader), colour.clone())?;
+                colours_changed = true;
+            }
+            self.apply_scribble(fader).await?;
+        }
+
+        Ok(colours_changed)
+    }
+
+    /// Builds a page from what is currently configured on the device.
+    fn capture_fader_page(&self, bank: SampleBank) -> goxlr_ipc::FaderPage {
+        let lighting = self.profile.get_lighting_ipc(false, false);
+
+        let faders = FaderName::iter()
+            .map(|fader| {
+                let state = self.get_fader_state(fader);
+                let mut entry = goxlr_ipc::FaderPageEntry::new(fader);
+
+                entry.channel = Some(state.channel);
+                entry.mute_function = Some(state.mute_type);
+
+                if let Some(light) = lighting.faders.get(&fader) {
+                    entry.display_style = Some(light.style);
+                    entry.fader_colours = Some((
+                        light.colours.colour_one.clone(),
+                        light.colours.colour_two.clone(),
+                    ));
+                }
+                if let Some(light) = lighting.buttons.get(&fader_mute_button(fader)) {
+                    entry.mute_off_style = Some(light.off_style);
+                    entry.mute_colours = Some((
+                        light.colours.colour_one.clone(),
+                        light.colours.colour_two.clone(),
+                    ));
+                }
+                if let Some(scribble) = state.scribble {
+                    entry.scribble = Some(goxlr_ipc::FaderPageScribble {
+                        icon: scribble.file_name,
+                        text: scribble.bottom_text,
+                        number: scribble.left_text,
+                        inverted: scribble.inverted,
+                        colour: lighting
+                            .simple
+                            .get(&fader_scribble_target(fader))
+                            .map(|c| c.colour_one.clone()),
+                    });
+                }
+                entry
+            })
+            .collect();
+
+        goxlr_ipc::FaderPage { bank, faders }
     }
 
     pub async fn validate_sampler(&mut self) -> Result<()> {
@@ -1885,27 +2069,65 @@ impl<'a> Device<'a> {
                 self.set_fader(fader, channel).await?;
             }
             GoXLRCommand::SetFaderMuteFunction(fader, behaviour) => {
-                if self.profile.get_mute_button_behaviour(fader) == behaviour {
-                    // Settings are the same..
-                    return Ok(());
+                self.set_fader_mute_function(fader, behaviour).await?;
+            }
+
+            // Fader Paging
+            GoXLRCommand::SetFaderPagingEnabled(enabled) => {
+                let mut config = self.settings.fader_pages().get(self.serial()).await;
+                config.enabled = enabled;
+                self.settings.fader_pages().set(self.serial(), config).await;
+
+                if enabled {
+                    self.apply_active_fader_page().await?;
                 }
+            }
+            GoXLRCommand::SetFaderPageEntry(bank, entry) => {
+                let mut config = self.settings.fader_pages().get(self.serial()).await;
+                let fader = entry.fader;
 
-                // Unmute the channel to prevent weirdness, then set new behaviour
-                //self.unmute_fader(fader).await?;
-                self.profile.set_mute_button_behaviour(fader, behaviour);
-
-                // We'll pass 'None' into this as there's a guaranteed change..
-                self.apply_mute_from_profile(fader, None)?;
-
-                let channel = self.profile.get_fader_assignment(fader);
-                if BasicInputDevice::can_from(channel) {
-                    let input = BasicInputDevice::from(channel);
-                    self.apply_routing(input).await?;
-
-                    if input == BasicInputDevice::Chat && self.vc_mute_also_mute_cm {
-                        // Reapply the Mic routing in case we need to mute / unmute to Voice Chat
-                        self.apply_routing(BasicInputDevice::Microphone).await?;
+                if let Some(page) = config.pages.iter_mut().find(|p| p.bank == bank) {
+                    if let Some(existing) = page.faders.iter_mut().find(|e| e.fader == fader) {
+                        *existing = entry;
+                    } else {
+                        page.faders.push(entry);
                     }
+                } else {
+                    config.pages.push(goxlr_ipc::FaderPage {
+                        bank,
+                        faders: vec![entry],
+                    });
+                }
+                self.settings.fader_pages().set(self.serial(), config).await;
+
+                // If this is the page that's currently on the device, show the change.
+                if bank == self.profile.get_active_sample_bank() {
+                    self.apply_active_fader_page().await?;
+                }
+            }
+            GoXLRCommand::ClearFaderPageEntry(bank, fader) => {
+                let mut config = self.settings.fader_pages().get(self.serial()).await;
+                if let Some(page) = config.pages.iter_mut().find(|p| p.bank == bank) {
+                    page.faders.retain(|e| e.fader != fader);
+                }
+                self.settings.fader_pages().set(self.serial(), config).await;
+            }
+            GoXLRCommand::CaptureFaderPage(bank) => {
+                let page = self.capture_fader_page(bank);
+                let mut config = self.settings.fader_pages().get(self.serial()).await;
+
+                if let Some(existing) = config.pages.iter_mut().find(|p| p.bank == bank) {
+                    *existing = page;
+                } else {
+                    config.pages.push(page);
+                }
+                self.settings.fader_pages().set(self.serial(), config).await;
+            }
+            GoXLRCommand::ApplyFaderPage(bank) => {
+                // Preview, applies regardless of whether paging is enabled.
+                let config = self.settings.fader_pages().get(self.serial()).await;
+                if let Some(page) = config.pages.iter().find(|p| p.bank == bank) {
+                    self.apply_fader_page(page).await?;
                 }
             }
 
@@ -3773,6 +3995,12 @@ impl<'a> Device<'a> {
         debug!("Applying Voice FX");
         self.apply_voice_fx()?;
 
+        // Fader Paging overlays the page for the active bank on top of the loaded profile..
+        debug!("Applying Fader Page..");
+        if let Err(e) = self.apply_active_fader_page().await {
+            warn!("Unable to apply Fader Page: {e:#}");
+        }
+
         // Drop this to the end so it doesn't directly interfere with profile loading..
         debug!("Validating Sampler Configuration..");
         self.validate_sampler().await?;
@@ -4221,5 +4449,24 @@ fn tts_target(target: MuteFunction) -> String {
         MuteFunction::ToLineOut => " to Line Out".to_string(),
         MuteFunction::ToStream2 => " to Stream Mix 2".to_string(),
         MuteFunction::ToStreams => " to Stream Mix 1 and 2".to_string(),
+    }
+}
+
+fn fader_mute_button(fader: FaderName) -> Button {
+    match fader {
+        FaderName::A => Button::Fader1Mute,
+        FaderName::B => Button::Fader2Mute,
+        FaderName::C => Button::Fader3Mute,
+        FaderName::D => Button::Fader4Mute,
+    }
+}
+
+fn fader_scribble_target(fader: FaderName) -> goxlr_types::SimpleColourTargets {
+    use goxlr_types::SimpleColourTargets;
+    match fader {
+        FaderName::A => SimpleColourTargets::Scribble1,
+        FaderName::B => SimpleColourTargets::Scribble2,
+        FaderName::C => SimpleColourTargets::Scribble3,
+        FaderName::D => SimpleColourTargets::Scribble4,
     }
 }

@@ -309,6 +309,13 @@ pub enum GoXLRCommand {
     SetLockFaders(bool),
     SetVodMode(VodMode),
 
+    // Fader Paging (stored in fader-pages.json, applied on Sampler Bank change)
+    SetFaderPagingEnabled(bool),
+    SetFaderPageEntry(SampleBank, FaderPageEntry),
+    ClearFaderPageEntry(SampleBank, FaderName),
+    CaptureFaderPage(SampleBank),
+    ApplyFaderPage(SampleBank),
+
     // These control the current GoXLR 'State'..
     SetActiveEffectPreset(EffectBankPresets),
     SetActiveSamplerBank(SampleBank),

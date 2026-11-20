@@ -58,6 +58,9 @@ const DEFAULT_PROFILE: &[u8] = include_bytes!("../profiles/Default.goxlr");
 pub struct ProfileAdapter {
     name: String,
     profile: Profile,
+
+    // Pads on the active bank that run a Sampler Action, they're lit as if they had samples.
+    action_pads: Vec<goxlr_types::SampleButtons>,
 }
 
 impl ProfileAdapter {
@@ -83,7 +86,11 @@ impl ProfileAdapter {
 
     pub fn from_reader<R: Read + Seek>(name: String, reader: R) -> Result<Self> {
         let profile = Profile::load(reader)?;
-        Ok(Self { name, profile })
+        Ok(Self {
+            name,
+            profile,
+            action_pads: vec![],
+        })
     }
 
     pub fn can_create_new_file(name: String, directory: &Path) -> Result<()> {
@@ -561,7 +568,10 @@ impl ProfileAdapter {
         button: SampleButtons,
         index: u8,
     ) -> [u8; 4] {
-        if self.current_sample_bank_has_samples(profile_to_standard_sample_button(button)) {
+        let standard_button = profile_to_standard_sample_button(button);
+        if self.current_sample_bank_has_samples(standard_button)
+            || self.action_pads.contains(&standard_button)
+        {
             return get_profile_colour_map(self.profile.settings(), target)
                 .colour(index)
                 .to_reverse_bytes();
@@ -1849,6 +1859,13 @@ impl ProfileAdapter {
             .sample_button(standard_to_profile_sample_button(button))
             .colour_map()
             .get_state()
+    }
+
+    /// Pads with a Sampler Action are lit like pads with samples, returns whether this changed.
+    pub fn set_action_pads(&mut self, pads: Vec<goxlr_types::SampleButtons>) -> bool {
+        let changed = self.action_pads != pads;
+        self.action_pads = pads;
+        changed
     }
 
     pub fn set_sample_button_state(&mut self, button: goxlr_types::SampleButtons, state: bool) {

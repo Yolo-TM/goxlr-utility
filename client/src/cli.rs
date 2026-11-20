@@ -117,6 +117,12 @@ pub enum SubCommands {
         command: FaderPagingCommands,
     },
 
+    /// Sampler Pad Actions, run apps / GoXLR commands from the sampler pads
+    SamplerActions {
+        #[command(subcommand)]
+        command: SamplerActionCommands,
+    },
+
     /// Commands for configuring the cough button
     CoughButton {
         #[command(subcommand)]
@@ -1049,6 +1055,90 @@ pub enum HardTune {
     Enabled {
         #[arg(value_parser, action = ArgAction::Set)]
         enabled: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+#[command(arg_required_else_help = true)]
+pub enum SamplerActionCommands {
+    /// Enable or disable all Sampler Pad Actions
+    Enabled {
+        #[arg(value_parser, action = ArgAction::Set)]
+        enabled: bool,
+    },
+
+    /// Start an application (disabled while network access is enabled)
+    Launch {
+        #[arg(value_enum)]
+        pad: SampleButtons,
+
+        /// The command line, e.g. "firefox --private-window"
+        command_line: String,
+
+        /// The working directory for the application
+        #[arg(long)]
+        working_dir: Option<String>,
+
+        /// Only on this bank, otherwise the pad does this on every bank
+        #[arg(long, value_enum)]
+        bank: Option<SampleBank>,
+    },
+
+    /// Open a URL or file (disabled while network access is enabled)
+    Open {
+        #[arg(value_enum)]
+        pad: SampleButtons,
+        target: String,
+        #[arg(long, value_enum)]
+        bank: Option<SampleBank>,
+    },
+
+    /// Switch the active Effect Preset
+    EffectPreset {
+        #[arg(value_enum)]
+        pad: SampleButtons,
+        #[arg(value_enum)]
+        preset: EffectBankPresets,
+        #[arg(long, value_enum)]
+        bank: Option<SampleBank>,
+    },
+
+    /// Load a profile
+    Profile {
+        #[arg(value_enum)]
+        pad: SampleButtons,
+        name: String,
+
+        /// Load a mic profile instead
+        #[arg(long)]
+        mic: bool,
+        #[arg(long, value_enum)]
+        bank: Option<SampleBank>,
+    },
+
+    /// Run GoXLR commands, given as a JSON array, e.g. '[{"SetFXEnabled":true}]'
+    Commands {
+        #[arg(value_enum)]
+        pad: SampleButtons,
+        json: String,
+        #[arg(long, value_enum)]
+        bank: Option<SampleBank>,
+    },
+
+    /// Remove the action from a pad
+    Clear {
+        #[arg(value_enum)]
+        pad: SampleButtons,
+        #[arg(long, value_enum)]
+        bank: Option<SampleBank>,
+    },
+
+    /// Run the action of a pad now
+    Test {
+        #[arg(value_enum)]
+        pad: SampleButtons,
+        #[arg(long, value_enum)]
+        bank: Option<SampleBank>,
     },
 }
 

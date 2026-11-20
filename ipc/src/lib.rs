@@ -316,6 +316,12 @@ pub enum GoXLRCommand {
     CaptureFaderPage(SampleBank),
     ApplyFaderPage(SampleBank),
 
+    // Sampler Pad Actions (stored in sampler-actions.json). `None` as the bank means 'every bank'.
+    SetSamplerActionsEnabled(bool),
+    SetSamplerAction(Option<SampleBank>, SampleButtons, PadActionKind),
+    ClearSamplerAction(Option<SampleBank>, SampleButtons),
+    TestSamplerAction(Option<SampleBank>, SampleButtons),
+
     // These control the current GoXLR 'State'..
     SetActiveEffectPreset(EffectBankPresets),
     SetActiveSamplerBank(SampleBank),

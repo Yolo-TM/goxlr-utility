@@ -41,6 +41,7 @@ use crate::tts::spawn_tts_service;
 
 mod audio;
 mod cli;
+mod config_store;
 mod device;
 mod events;
 mod fader_pages;
@@ -50,6 +51,7 @@ mod mic_profile;
 mod platform;
 mod primary_worker;
 mod profile;
+mod sampler_actions;
 mod servers;
 mod settings;
 mod shutdown;

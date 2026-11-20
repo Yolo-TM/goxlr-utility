@@ -1,6 +1,8 @@
-use crate::fader_pages::FaderPagesHandle;
+use crate::config_store::DeviceConfigStore;
+use crate::fader_pages::{FADER_PAGES_FILE_NAME, FaderPagesHandle};
 use crate::mic_profile::DEFAULT_MIC_PROFILE_NAME;
 use crate::profile::DEFAULT_PROFILE_NAME;
+use crate::sampler_actions::{SAMPLER_ACTIONS_FILE_NAME, SamplerActionsHandle};
 use anyhow::{Context, Result};
 use directories::ProjectDirs;
 use goxlr_ipc::{FirmwareSource, GoXLRCommand, LogLevel};
@@ -20,6 +22,7 @@ use tokio::sync::RwLock;
 pub struct SettingsHandle {
     path: PathBuf,
     fader_pages: FaderPagesHandle,
+    sampler_actions: SamplerActionsHandle,
     data_dir: PathBuf,
     settings: Arc<RwLock<Settings>>,
 }
@@ -156,10 +159,12 @@ impl SettingsHandle {
             settings.devices = Some(Default::default());
         }
 
-        let fader_pages = FaderPagesHandle::load(&path);
+        let fader_pages = DeviceConfigStore::load(&path, FADER_PAGES_FILE_NAME);
+        let sampler_actions = DeviceConfigStore::load(&path, SAMPLER_ACTIONS_FILE_NAME);
         let handle = SettingsHandle {
             path,
             fader_pages,
+            sampler_actions,
             data_dir: data_dir.to_path_buf(),
             settings: Arc::new(RwLock::new(settings)),
         };
@@ -181,6 +186,11 @@ impl SettingsHandle {
     /// Fader Paging lives in its own file (fader-pages.json) next to the settings.
     pub fn fader_pages(&self) -> &FaderPagesHandle {
         &self.fader_pages
+    }
+
+    /// Sampler Pad actions live in their own file (sampler-actions.json) next to the settings.
+    pub fn sampler_actions(&self) -> &SamplerActionsHandle {
+        &self.sampler_actions
     }
 
     fn get_default_path(&self, suffix: Paths) -> PathBuf {

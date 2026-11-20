@@ -3,8 +3,8 @@ use crate::cli::{
     CoughButtonBehaviours, Echo, EffectsCommands, EqualiserCommands, EqualiserMiniCommands,
     FaderCommands, FaderLightingCommands, FaderPagingCommands, FadersAllLightingCommands,
     FirmwareCommands, Gender, HardTune, LightingCommands, Megaphone, MicrophoneCommands,
-    NoiseGateCommands, Pitch, ProfileAction, ProfileType, Reverb, Robot, SamplerCommands,
-    Scribbles, SubCommands, SubmixCommands,
+    NoiseGateCommands, Pitch, ProfileAction, ProfileType, Reverb, Robot, SamplerActionCommands,
+    SamplerCommands, Scribbles, SubCommands, SubmixCommands,
 };
 use crate::cli::{Cli, DeviceSettings};
 use crate::microphone::apply_microphone_controls;
@@ -182,6 +182,75 @@ pub async fn run_cli() -> Result<()> {
                             .await?;
                     }
                 },
+                SubCommands::SamplerActions { command } => {
+                    use goxlr_ipc::PadActionKind;
+                    let command = match command {
+                        SamplerActionCommands::Enabled { enabled } => {
+                            GoXLRCommand::SetSamplerActionsEnabled(*enabled)
+                        }
+                        SamplerActionCommands::Launch {
+                            pad,
+                            command_line,
+                            working_dir,
+                            bank,
+                        } => GoXLRCommand::SetSamplerAction(
+                            *bank,
+                            *pad,
+                            PadActionKind::Launch {
+                                command_line: command_line.clone(),
+                                working_dir: working_dir.clone(),
+                            },
+                        ),
+                        SamplerActionCommands::Open { pad, target, bank } => {
+                            GoXLRCommand::SetSamplerAction(
+                                *bank,
+                                *pad,
+                                PadActionKind::Open {
+                                    target: target.clone(),
+                                },
+                            )
+                        }
+                        SamplerActionCommands::EffectPreset { pad, preset, bank } => {
+                            GoXLRCommand::SetSamplerAction(
+                                *bank,
+                                *pad,
+                                PadActionKind::SwitchEffectPreset(*preset),
+                            )
+                        }
+                        SamplerActionCommands::Profile {
+                            pad,
+                            name,
+                            mic,
+                            bank,
+                        } => GoXLRCommand::SetSamplerAction(
+                            *bank,
+                            *pad,
+                            PadActionKind::SwitchProfile {
+                                name: name.clone(),
+                                mic: *mic,
+                            },
+                        ),
+                        SamplerActionCommands::Commands { pad, json, bank } => {
+                            let commands: Vec<GoXLRCommand> = serde_json::from_str(json)
+                                .context("The commands aren't valid JSON GoXLR commands")?;
+                            GoXLRCommand::SetSamplerAction(
+                                *bank,
+                                *pad,
+                                PadActionKind::Macro(commands),
+                            )
+                        }
+                        SamplerActionCommands::Clear { pad, bank } => {
+                            GoXLRCommand::ClearSamplerAction(*bank, *pad)
+                        }
+                        SamplerActionCommands::Test { pad, bank } => {
+                            GoXLRCommand::TestSamplerAction(*bank, *pad)
+                        }
+                    };
+                    client
+                        .command(&serial, command)
+                        .await
+                        .context("Unable to update Sampler Actions")?;
+                }
                 SubCommands::FaderPaging { command } => {
                     let command = match command {
                         FaderPagingCommands::Enabled { enabled } => {

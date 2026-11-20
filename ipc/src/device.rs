@@ -85,6 +85,10 @@ pub struct MixerStatus {
     pub sampler: Option<Sampler>,
     pub settings: Settings,
     pub fader_paging: FaderPagingConfig,
+    pub sampler_actions: SamplerActionConfig,
+
+    /// Launch / Open actions don't run (and can't be set) while network access is enabled.
+    pub launch_actions_blocked: bool,
     pub button_down: EnumMap<Button, bool>,
     pub profile_name: String,
     pub mic_profile_name: String,
@@ -147,6 +151,69 @@ pub struct FaderPageScribble {
     pub number: Option<String>,
     pub inverted: bool,
     pub colour: Option<String>,
+}
+
+/// Sampler Pad Actions: a pad with an action runs it instead of playing a sample.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SamplerActionConfig {
+    pub enabled: bool,
+    pub actions: Vec<SamplerAction>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SamplerAction {
+    /// `None` applies to the pad on every Sampler Bank, a specific bank takes precedence.
+    pub bank: Option<SampleBank>,
+    pub button: SampleButtons,
+    pub action: PadActionKind,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum PadActionKind {
+    /// Start an application, the line is split like a shell would (quotes are respected).
+    Launch {
+        command_line: String,
+        working_dir: Option<String>,
+    },
+    /// Open a URL or file with the default application.
+    Open { target: String },
+    /// Run a single GoXLR command.
+    Command(Box<GoXLRCommand>),
+    /// Run several GoXLR commands in order.
+    Macro(Vec<GoXLRCommand>),
+    /// Switch the active Effect preset (1 - 6).
+    SwitchEffectPreset(EffectBankPresets),
+    /// Load a profile (or a mic profile) by name.
+    SwitchProfile { name: String, mic: bool },
+}
+
+impl PadActionKind {
+    /// Whether this action starts programs on the machine (blocked while LAN access is on).
+    pub fn runs_programs(&self) -> bool {
+        matches!(
+            self,
+            PadActionKind::Launch { .. } | PadActionKind::Open { .. }
+        )
+    }
+
+    /// The GoXLR commands this action runs, empty for program actions.
+    pub fn commands(&self) -> Vec<GoXLRCommand> {
+        match self {
+            PadActionKind::Command(command) => vec![(**command).clone()],
+            PadActionKind::Macro(commands) => commands.clone(),
+            PadActionKind::SwitchEffectPreset(preset) => {
+                vec![GoXLRCommand::SetActiveEffectPreset(*preset)]
+            }
+            PadActionKind::SwitchProfile { name, mic: false } => {
+                vec![GoXLRCommand::LoadProfile(name.clone(), true)]
+            }
+            PadActionKind::SwitchProfile { name, mic: true } => {
+                vec![GoXLRCommand::LoadMicProfile(name.clone(), true)]
+            }
+            PadActionKind::Launch { .. } | PadActionKind::Open { .. } => vec![],
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

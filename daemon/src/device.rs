@@ -42,6 +42,7 @@ use crate::mic_profile::{DEFAULT_MIC_PROFILE_NAME, MicProfileAdapter};
 use crate::profile::{
     DEFAULT_PROFILE_NAME, ProfileAdapter, usb_to_standard_button, version_newer_or_equal_to,
 };
+use crate::sampler_actions;
 
 pub struct Device<'a> {
     goxlr: Box<dyn FullGoXLRDevice>,
@@ -61,6 +62,9 @@ pub struct Device<'a> {
 
     last_sample_error: Option<String>,
     tap_tempo: VecDeque<Instant>,
+
+    // Used to ignore double triggers of Sampler Pad Actions
+    last_pad_action: EnumMap<SampleButtons, Option<Instant>>,
 }
 
 #[derive(Debug, Default, Copy, Clone)]
@@ -228,6 +232,7 @@ impl<'a> Device<'a> {
 
             last_sample_error: None,
             tap_tempo: VecDeque::with_capacity(4),
+            last_pad_action: EnumMap::default(),
         };
 
         device.apply_profile(None).await?;
@@ -285,6 +290,8 @@ impl<'a> Device<'a> {
         let locked_faders = self.settings.get_device_lock_faders(self.serial()).await;
         let vod_mode = self.settings.get_device_vod_mode(self.serial()).await;
         let fader_paging = self.settings.fader_pages().get(self.serial()).await;
+        let sampler_actions = self.settings.sampler_actions().get(self.serial()).await;
+        let launch_actions_blocked = self.settings.get_allow_network_access().await;
 
         let sampler_fade_duration = self.settings.get_sampler_fade_duration(self.serial()).await;
 
@@ -344,6 +351,8 @@ impl<'a> Device<'a> {
                 },
             ),
             fader_paging,
+            sampler_actions,
+            launch_actions_blocked,
             settings: Settings {
                 display: Display {
                     gate: self.mic_profile.get_gate_display_mode(),
@@ -432,6 +441,10 @@ impl<'a> Device<'a> {
                 | GoXLRCommand::SetFaderPageEntry(_, _)
                 | GoXLRCommand::ClearFaderPageEntry(_, _)
                 | GoXLRCommand::CaptureFaderPage(_)
+                // sampler-actions.json
+                | GoXLRCommand::SetSamplerActionsEnabled(_)
+                | GoXLRCommand::SetSamplerAction(..)
+                | GoXLRCommand::ClearSamplerAction(..)
                 => {
                     if !avoid_write {
                         let _ = self.perform_command(command).await;
@@ -505,6 +518,14 @@ impl<'a> Device<'a> {
             if refresh_colour_map {
                 self.load_colour_map().await?;
             }
+        }
+
+        // Keep the lighting of pads with a Sampler Action current (also reacts to the network
+        // access setting changing, which blocks program actions).
+        if self.refresh_action_pads().await {
+            self.load_colour_map().await?;
+            self.update_button_states()?;
+            state_updated = true;
         }
 
         // Find any buttons that have been held, and action if needed.
@@ -1215,6 +1236,7 @@ impl<'a> Device<'a> {
         let _ = self.global_events.send(TTSMessage(tts_message)).await;
 
         self.profile.load_sample_bank(bank)?;
+        self.refresh_action_pads().await;
 
         // Sync the state of active playback..
         if let Some(audio) = &self.audio_handler {
@@ -1259,6 +1281,99 @@ impl<'a> Device<'a> {
                 // Reapply the Mic routing in case we need to mute / unmute to Voice Chat
                 self.apply_routing(BasicInputDevice::Microphone).await?;
             }
+        }
+        Ok(())
+    }
+
+    /// Recalculates which pads on the active bank run an action, returns whether that changed.
+    async fn refresh_action_pads(&mut self) -> bool {
+        if self.is_device_mini() {
+            return false;
+        }
+
+        let config = self.settings.sampler_actions().get(self.serial()).await;
+        let programs_allowed = !self.settings.get_allow_network_access().await;
+        let bank = self.profile.get_active_sample_bank();
+
+        let pads = sampler_actions::pads_for_bank(&config, bank, programs_allowed);
+        self.profile.set_action_pads(pads)
+    }
+
+    async fn pad_actions_changed(&mut self) -> Result<()> {
+        self.refresh_action_pads().await;
+        self.load_colour_map().await?;
+        self.update_button_states()
+    }
+
+    /// Whether the pad has a configured action on the active bank (even if it is currently blocked).
+    async fn pad_has_action(&self, button: SampleButtons) -> bool {
+        if self.is_device_mini() {
+            return false;
+        }
+
+        let config = self.settings.sampler_actions().get(self.serial()).await;
+        config.enabled
+            && sampler_actions::find_action(&config, self.profile.get_active_sample_bank(), button)
+                .is_some()
+    }
+
+    /// Runs the action for a pressed pad, returns false if the pad has none (normal sampler).
+    async fn handle_pad_action_press(&mut self, button: SampleButtons) -> Result<bool> {
+        if self.is_device_mini() {
+            return Ok(false);
+        }
+
+        let config = self.settings.sampler_actions().get(self.serial()).await;
+        if !config.enabled {
+            return Ok(false);
+        }
+
+        let bank = self.profile.get_active_sample_bank();
+        let Some(entry) = sampler_actions::find_action(&config, bank, button) else {
+            return Ok(false);
+        };
+        let action = entry.action.clone();
+
+        // Ignore double triggers (contact bounce, a nervous finger)
+        let now = Instant::now();
+        if let Some(last) = self.last_pad_action[button]
+            && now.duration_since(last) < Duration::from_millis(300)
+        {
+            return Ok(true);
+        }
+        self.last_pad_action[button] = Some(now);
+
+        // Light the pad while it's held
+        self.profile.set_sample_button_state(button, true);
+        self.update_button_states()?;
+
+        // A failing action must never break the button handling, so log it and carry on.
+        if let Err(e) = self.run_pad_action(&action).await {
+            warn!("Sampler Action on {button:?} failed: {e:#}");
+        }
+        Ok(true)
+    }
+
+    async fn run_pad_action(&mut self, action: &goxlr_ipc::PadActionKind) -> Result<()> {
+        use goxlr_ipc::PadActionKind;
+
+        if action.runs_programs() {
+            if self.settings.get_allow_network_access().await {
+                bail!("Launching programs is disabled while network access is enabled");
+            }
+            return match action {
+                PadActionKind::Launch {
+                    command_line,
+                    working_dir,
+                } => sampler_actions::launch(command_line, working_dir.as_deref()),
+                PadActionKind::Open { target } => sampler_actions::open_target(target),
+                _ => Ok(()),
+            };
+        }
+
+        for command in action.commands() {
+            // Boxed, as performing a command can lead back to here (recursive async).
+            Box::pin(self.perform_command(command)).await?;
         }
         Ok(())
     }
@@ -1446,6 +1561,11 @@ impl<'a> Device<'a> {
             return Ok(());
         }
 
+        // A pad with a Sampler Action runs it instead of playing / recording a sample.
+        if self.handle_pad_action_press(button).await? {
+            return Ok(());
+        }
+
         if self.audio_handler.is_none() {
             return Err(anyhow!(
                 "Not handling button, audio handler not configured."
@@ -1549,6 +1669,12 @@ impl<'a> Device<'a> {
 
     async fn handle_sample_button_release(&mut self, button: SampleButtons) -> Result<()> {
         let active_bank = self.profile.get_active_sample_bank();
+
+        // Pad actions run on press, on release we only drop the 'pressed' lighting.
+        if !self.profile.is_sample_clear_active() && self.pad_has_action(button).await {
+            self.profile.set_sample_button_state(button, false);
+            return Ok(());
+        }
         // If clear is flashing, remove all samples from the button, disable the clearer and return..
         if self.profile.is_sample_clear_active() {
             debug!("Stopping any playing samples..");
@@ -2132,6 +2258,53 @@ impl<'a> Device<'a> {
                     config.pages.push(page);
                 }
                 self.settings.fader_pages().set(self.serial(), config).await;
+            }
+            GoXLRCommand::SetSamplerActionsEnabled(enabled) => {
+                let mut config = self.settings.sampler_actions().get(self.serial()).await;
+                config.enabled = enabled;
+                self.settings
+                    .sampler_actions()
+                    .set(self.serial(), config)
+                    .await;
+                self.pad_actions_changed().await?;
+            }
+            GoXLRCommand::SetSamplerAction(bank, button, action) => {
+                if self.is_device_mini() {
+                    bail!("The GoXLR Mini has no sampler");
+                }
+                sampler_actions::validate(&action)?;
+                if action.runs_programs() && self.settings.get_allow_network_access().await {
+                    bail!("Launching programs is disabled while network access is enabled");
+                }
+
+                let mut config = self.settings.sampler_actions().get(self.serial()).await;
+                sampler_actions::upsert(&mut config, bank, button, action);
+                self.settings
+                    .sampler_actions()
+                    .set(self.serial(), config)
+                    .await;
+                self.pad_actions_changed().await?;
+            }
+            GoXLRCommand::ClearSamplerAction(bank, button) => {
+                let mut config = self.settings.sampler_actions().get(self.serial()).await;
+                sampler_actions::remove(&mut config, bank, button);
+                self.settings
+                    .sampler_actions()
+                    .set(self.serial(), config)
+                    .await;
+                self.pad_actions_changed().await?;
+            }
+            GoXLRCommand::TestSamplerAction(bank, button) => {
+                let config = self.settings.sampler_actions().get(self.serial()).await;
+                let Some(entry) = config
+                    .actions
+                    .iter()
+                    .find(|a| a.bank == bank && a.button == button)
+                else {
+                    bail!("No action configured for that pad");
+                };
+                let action = entry.action.clone();
+                self.run_pad_action(&action).await?;
             }
             GoXLRCommand::ApplyFaderPage(bank) => {
                 // Preview, applies regardless of whether paging is enabled.
@@ -3971,6 +4144,8 @@ impl<'a> Device<'a> {
 
         debug!("Applying Submixing Settings..");
         self.load_submix_settings(true).await?;
+
+        self.refresh_action_pads().await;
 
         debug!("Loading Colour Map..");
         self.load_colour_map().await?;

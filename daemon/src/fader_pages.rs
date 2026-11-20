@@ -113,3 +113,49 @@ impl FaderPagesHandle {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use goxlr_ipc::{FaderPage, FaderPageEntry};
+    use goxlr_types::{ChannelName, FaderName, SampleBank};
+
+    fn temp_settings_path(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("goxlr-fader-pages-{name}-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        dir.join("settings.json")
+    }
+
+    #[tokio::test]
+    async fn round_trips_per_device() {
+        let settings = temp_settings_path("roundtrip");
+        let handle = FaderPagesHandle::load(&settings);
+        assert!(!handle.get("S1").await.enabled);
+
+        let mut entry = FaderPageEntry::new(FaderName::B);
+        entry.channel = Some(ChannelName::Music);
+        let config = FaderPagingConfig {
+            enabled: true,
+            pages: vec![FaderPage {
+                bank: SampleBank::B,
+                faders: vec![entry],
+            }],
+        };
+        handle.set("S1", config.clone()).await;
+
+        let reloaded = FaderPagesHandle::load(&settings);
+        assert_eq!(reloaded.get("S1").await, config);
+        assert_eq!(reloaded.get("other").await, FaderPagingConfig::default());
+    }
+
+    #[tokio::test]
+    async fn corrupt_file_is_backed_up_and_defaults_loaded() {
+        let settings = temp_settings_path("corrupt");
+        fs::write(settings.with_file_name(FADER_PAGES_FILE_NAME), "{ nope").unwrap();
+
+        let handle = FaderPagesHandle::load(&settings);
+        assert_eq!(handle.get("S1").await, FaderPagingConfig::default());
+        assert!(settings.with_file_name("fader-pages.failed").exists());
+    }
+}

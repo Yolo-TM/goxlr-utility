@@ -1,0 +1,108 @@
+name: Fork Build (downloads)
+
+# Builds the Linux / Windows binaries and the Nix flake. Pushes to feature/fader-paging update a rolling
+# pre-release ("fader-paging-latest"), version tags (v*) create a normal release.
+on:
+  push:
+    branches: [ feature/fader-paging ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux:
+    name: Linux build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpulse-dev libdbus-1-dev pkg-config libspeechd-dev libusb-1.0-0-dev
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release --all-features
+      - name: Package
+        run: |
+          mkdir -p dist/goxlr-utility-linux-x86_64
+          for bin in goxlr-daemon goxlr-client goxlr-client-quiet goxlr-launcher goxlr-initialiser; do
+            [ -f "target/release/$bin" ] && cp "target/release/$bin" dist/goxlr-utility-linux-x86_64/ || true
+          done
+          cp 50-goxlr.rules daemon/resources/goxlr-utility.desktop daemon/resources/goxlr-utility.svg dist/goxlr-utility-linux-x86_64/
+          tar -C dist -czf goxlr-utility-linux-x86_64.tar.gz goxlr-utility-linux-x86_64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64
+          path: goxlr-utility-linux-x86_64.tar.gz
+
+  windows:
+    name: Windows build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release --all-features
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist/goxlr-utility-windows-x86_64 | Out-Null
+          Get-ChildItem target/release/goxlr-*.exe | Copy-Item -Destination dist/goxlr-utility-windows-x86_64/
+          Compress-Archive -Path dist/goxlr-utility-windows-x86_64 -DestinationPath goxlr-utility-windows-x86_64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64
+          path: goxlr-utility-windows-x86_64.zip
+
+  nix:
+    name: Nix flake build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: experimental-features = nix-command flakes
+      - run: nix build .#goxlr-utility --print-build-logs
+      - run: nix flake check --no-build
+
+  release:
+    name: Publish downloads
+    needs: [ linux, windows, nix ]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      # Branch pushes move a rolling tag, so the pre-release always points at the latest build.
+      - name: Move rolling tag
+        if: github.ref_type == 'branch'
+        run: |
+          git tag -f fader-paging-latest "$GITHUB_SHA"
+          git push -f origin refs/tags/fader-paging-latest
+
+      - name: Rolling pre-release
+        if: github.ref_type == 'branch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: fader-paging-latest
+          name: Fader Paging (latest build)
+          prerelease: true
+          body: "Automatic build of `${{ github.ref_name }}` at ${{ github.sha }}."
+          files: artifacts/*
+
+      - name: Tagged release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true

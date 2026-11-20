@@ -226,8 +226,5 @@ fn locate_goxlr_driver() -> bool {
     let path = String::from(
         "C:/Program Files/TC-HELICON/GoXLR_Audio_Driver/W10_x64/goxlr_audioapi_x64.dll",
     );
-    if PathBuf::from(&path).exists() {
-        return true;
-    }
-    false
+    PathBuf::from(&path).exists()
 }

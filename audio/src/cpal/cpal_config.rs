@@ -93,10 +93,7 @@ impl CpalConfiguration {
                         }
                     }
 
-                    if x.name().unwrap_or_else(|_| "UNKNOWN".to_string()) == str_device {
-                        return true;
-                    }
-                    false
+                    x.name().unwrap_or_else(|_| "UNKNOWN".to_string()) == str_device
                 })
             {
                 cpal_device = Some(device)

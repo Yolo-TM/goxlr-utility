@@ -235,29 +235,16 @@ impl ColourMap {
             return false;
         }
 
-        if self.colour_display.as_ref().unwrap() == &Gradient {
-            return true;
-        }
-
-        if self.colour_display.as_ref().unwrap() == &GradientMeter {
-            return true;
-        }
-
-        false
+        let display = self.colour_display.as_ref().unwrap();
+        display == &Gradient || display == &GradientMeter
     }
 
     pub fn is_fader_meter(&self) -> bool {
         if self.colour_display.is_none() {
             return false;
         }
-        if self.colour_display.as_ref().unwrap() == &Meter {
-            return true;
-        }
-        if self.colour_display.as_ref().unwrap() == &GradientMeter {
-            return true;
-        }
-
-        false
+        let display = self.colour_display.as_ref().unwrap();
+        display == &Meter || display == &GradientMeter
     }
 
     pub fn set_fader_display(&mut self, display: ColourDisplay) {

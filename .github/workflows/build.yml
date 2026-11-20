@@ -74,7 +74,9 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned: tolk-sys (Windows TTS) assumes the old cargo target layout (build/<crate>-<hash>/out) and
+      # fails with "path not found" on newer cargo (build/<crate>/<hash>/out). Remove once tolk is fixed.
+      - uses: dtolnay/rust-toolchain@1.93.0
         with:
           components: clippy
 
@@ -90,13 +92,6 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-debug-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-debug-
-
-      # tolk-sys (TTS) copies DLLs into target/<profile>/examples and fails if it doesn't exist yet.
-      - name: Prepare tolk-sys output directory
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force target/debug/examples | Out-Null
-          New-Item -ItemType Directory -Force target/release/examples | Out-Null
 
       - name: Running Tests
         run: cargo check --all-features

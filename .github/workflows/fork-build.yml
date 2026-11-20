@@ -46,10 +46,14 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      # Pinned: this is the version the build is verified with locally, current stable fails on the
-      # Windows runner (upstream's own Windows check fails the same way on main).
-      - uses: dtolnay/rust-toolchain@1.93.0
+      - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # tolk-sys (TTS) copies DLLs into target/<profile>/examples and fails if it doesn't exist yet.
+      - name: Prepare tolk-sys output directory
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force target/debug/examples | Out-Null
+          New-Item -ItemType Directory -Force target/release/examples | Out-Null
       - name: Build
         run: cargo build --release --all-features
       - name: Package

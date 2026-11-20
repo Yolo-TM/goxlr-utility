@@ -91,6 +91,13 @@ jobs:
           key: ${{ runner.os }}-cargo-debug-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-debug-
 
+      # tolk-sys (TTS) copies DLLs into target/<profile>/examples and fails if it doesn't exist yet.
+      - name: Prepare tolk-sys output directory
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force target/debug/examples | Out-Null
+          New-Item -ItemType Directory -Force target/release/examples | Out-Null
+
       - name: Running Tests
         run: cargo check --all-features
 

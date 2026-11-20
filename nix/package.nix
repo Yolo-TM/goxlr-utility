@@ -36,13 +36,15 @@ rustPlatform.buildRustPackage {
 
   postInstall = ''
     install -Dm644 50-goxlr.rules $out/lib/udev/rules.d/50-goxlr.rules
+    # The shipped desktop file hardcodes /usr/bin, point it at the store path (works in KDE / GNOME menus).
     install -Dm644 daemon/resources/goxlr-utility.desktop $out/share/applications/goxlr-utility.desktop
+    substituteInPlace $out/share/applications/goxlr-utility.desktop       --replace-fail "Exec=/usr/bin/goxlr-launcher" "Exec=$out/bin/goxlr-launcher"       --replace-fail "Path=/usr/bin" "Path=$out/bin"
     install -Dm644 daemon/resources/goxlr-utility.svg $out/share/icons/hicolor/scalable/apps/goxlr-utility.svg
   '';
 
   meta = {
     description = "Unofficial GoXLR driver replacement for Linux, with configurable fader paging";
-    homepage = "https://github.com/IbimsnicesYolo/goxlr-utility";
+    homepage = "https://github.com/Yolo-TM/goxlr-utility";
     license = lib.licenses.mit;
     platforms = lib.platforms.linux;
     mainProgram = "goxlr-daemon";

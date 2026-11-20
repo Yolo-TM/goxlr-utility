@@ -1760,10 +1760,7 @@ impl ProfileAdapter {
             .sample_button(standard_to_profile_sample_button(button))
             .get_stack(bank);
 
-        if stack.get_track_count() == 0 {
-            return false;
-        }
-        true
+        stack.get_track_count() != 0
     }
 
     pub fn get_next_track(&mut self, button: goxlr_types::SampleButtons) -> Result<AudioFile> {
